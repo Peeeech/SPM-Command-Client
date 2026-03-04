@@ -19,24 +19,31 @@ Read Busy: Reads the current state of the game using the `marioKeyOffChk` functi
 
 ### Base
 Send Item: Sends an item to the game by string name
+
     Params: (Str[item-name])
 
 Set IDX: Manually set the IDX stored in memory
+
     Params: (Int[idx])
 
 Map-Interact: Returns the XYZ Position of a Map Object from it's string-name
+
     Params: (Str[mapObjName])
 
 ### Effect
 Effect Test: Currently binded to the function `effItemThunderEntry` as it was used to test parameter functions. Usage varies by parameters
-NOTE: The function does technically have a
+
     Params: (Float(x), Float(y), Float(z), Int[a], Int[b], Int[c], Int[d], Int[e])
-        a - seems to be a 'type' parameter, where 0 is a global 'whole-screen' thunder flash, and 1 is like the volt shroom zap on mario
+a - seems to be a 'type' parameter, where 0 is a global 'whole-screen' thunder flash, and 1 is like the volt shroom zap on mario
+
     (the rest of the params seem to only apply to type 1 from my testing)
-        b - seemingly a count for how many times the effect happens
-        c - seems to be a delay of sorts; the higher the value, the longer between flashes when b > 1
-        d - unk
-        e - unk
+b - seemingly a count for how many times the effect happens
+
+c - seems to be a delay of sorts; the higher the value, the longer between flashes when b > 1
+
+d - unk
+
+e - unk
 
 
 
