@@ -61,7 +61,9 @@ COMMANDS = {
         "CMD_MAP_INTERACT": 0x02,
     },
     "effect": {
-        "CMD_EFFECT_TEST": 0x80,
+        "CMD_SPM_RECOVER": 0x60,
+        "CMD_SPM_VOLT": 0x70,
+        "CMD_ITEM_THUNDER": 0x80,
     }
 }
 
@@ -77,7 +79,9 @@ class CommandDisplay(StrEnum):
     CMD_MAP_INTERACT = "Map Interact (Str: map_obj)"
 
     #Effect Commands
-    CMD_EFFECT_TEST = "Effect Test Command (Args: N/A)"
+    CMD_SPM_RECOVER = "SPM Recover (Args: f(XYZ), Int(*1) )"
+    CMD_SPM_VOLT = "SPM Volt (Args: f(XY), Int(*2) )"
+    CMD_ITEM_THUNDER = "Item Thunder (Args: f(XYZ), Int(*5) )"
 
 def toggleHelp():
     global HELP
@@ -142,7 +146,7 @@ def start_gui():
             raw = client.cmd_var.get()
 
             payload = bytearray()
-            tokens = "idfsb" #integer, string, float, double, byte - might need to expand as we add more commands with different arg types
+            tokens = "idfsbp" #integer, string, float, double, byte, pointer - might need to expand as we add more commands with different arg types
 
             i = 0
             n = len(raw)
@@ -219,6 +223,21 @@ def start_gui():
                     payload += struct.pack(">H", len(encoded)) #length prefix
                     payload += encoded
 
+                elif t == 'p': #pointer (just a hex string)
+                    if raw[i] != '"':
+                        client.log("Pointer type must be quoted (e.g., p\"80001234\")")
+                        return None
+                    i += 1 #skip opening quote
+                    start = i
+                    while raw[i] != '"':
+                        i += 1
+                    string = raw[start:i]
+                    i += 1 #skip closing quote
+
+                    value = int(string, 16)
+                    payload += b'p'
+                    payload += struct.pack(">I", value)
+
                 elif t == ' ': #skip whitespace
                     continue
 
@@ -293,7 +312,7 @@ def start_gui():
             append_log(f"Client is not alive, cannot queue command: {cmd.get()}")
 
     def preview_params(text: str) -> str:
-        tokens = "idfsb"
+        tokens = "idfsbp"
         i = 0
         n = len(text)
 
@@ -330,11 +349,13 @@ def start_gui():
                 except ValueError:
                     parts.append(f"{type_name}(!)")
 
-            elif t in ("s", "b"):
+            elif t in ("s", "b", "p"):
                 if t == "s":
                     type_name = "Str"
-                else:
+                elif t == "b":
                     type_name = "Bytes"
+                elif t == "p":
+                    type_name = "Pointer"
                 # require quoted string
                 if i >= n or text[i] != '"':
                     parts.append(f'{type_name}(?)')
@@ -347,12 +368,18 @@ def start_gui():
                     parts.append(f'{type_name}(unterminated)')
                     break
                 s = text[start:i]
+                if t == "p":
+                    if len(s) != 8:
+                        parts.append(f'Pointer(invalid)')
+                        break
                 i += 1  # closing quote
 
                 if t == "s":
                     parts.append(f'Str({s})')
-                else:
+                elif t == "b":
                     parts.append(f'Bytes({s})')
+                elif t == "p":
+                    parts.append(f'Pointer({s})')
 
             else:
                 parts.append(f"?{t}")
