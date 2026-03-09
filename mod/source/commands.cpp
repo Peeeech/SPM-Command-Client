@@ -7,6 +7,7 @@
 #include <spm/itemdrv.h>
 #include <spm/evtmgr.h>
 #include <spm/effdrv.h>
+#include "mod.h"
 #include <spm/system.h>
 #include <spm/mario.h>
 #include <spm/spmario.h>
@@ -23,6 +24,15 @@ static Stack<s32> itemStack;
 
 inline bool isWithinMem1Range(s32 ptr) {
     return (ptr >= 0x80000000 && ptr <= 0x817fffff);
+}
+
+inline bool isValidGamePtr(void* ptr)
+{
+    u32 addr = (u32)ptr;
+
+    return
+        (addr >= 0x80000000 && addr < 0x81800000) ||  // MEM1
+        (addr >= 0x90000000 && addr < 0x94000000);    // MEM2
 }
 
 s32 evt_item_entry_autoname(spm::evtmgr::EvtEntry *evtEntry, bool firstRun)
@@ -77,6 +87,7 @@ struct Params
     int ints[16];
     float floats[16];
     double doubles[16];
+    void* pointers[16];
 
     const char* strings[16];
     u16 stringLens[16];
@@ -85,6 +96,7 @@ struct Params
     int nFloats;
     int nDoubles;
     int nStrings;
+    int nPtrs;
 
     bool valid;
 };
@@ -97,6 +109,7 @@ Params payloadProcess(const u8* payload, size_t payloadLen)
     params.nFloats = 0;
     params.nDoubles = 0;
     params.nStrings = 0;
+    params.nPtrs = 0;
     params.valid = true;
 
     const u8* p = payload;
@@ -179,6 +192,26 @@ Params payloadProcess(const u8* payload, size_t payloadLen)
 
                 p += len;
 
+                break;
+            }
+
+            case 'p':
+            {
+                if(p+4 > end) { params.valid=false; return params; }
+
+                u32 v =
+                (p[0] << 24) |
+                (p[1] << 16) |
+                (p[2] << 8)  |
+                (p[3]);
+
+                void* ptr = (void*)v;
+
+                if(!isValidGamePtr(ptr)) { params.valid=false; return params; }
+
+                params.pointers[params.nPtrs++] = ptr;
+
+                p += 4;
                 break;
             }
 
@@ -267,49 +300,53 @@ Params payloadProcess(const u8* payload, size_t payloadLen)
 
 //Base Commands
     COMMAND(CMD_ITEM, item, "Gives mario an item. (item itemId)", 
-        {
-            if (payloadLen < (sizeof(u32) + sizeof(u16))) {
-                wii::os::OSReport("CMD_ITEM: payload too small (%zu)\n", payloadLen);
-                return 0;
-            }
+    {
+        Params params =
+        payloadProcess(payload, payloadLen);
 
-            u32 idx;
-            u16 itemId;
-            msl::string::memcpy(&idx, payload + 0, sizeof(u32));
-            msl::string::memcpy(&itemId, payload + sizeof(u32), sizeof(u16));
-
-            u16 itemState;
-            // DUPLICATE / OUT-OF-ORDER GUARD
-            if (idx != (*s_lastItemIdx + 1)) {
-                itemState = 8; // Error code for duplicate / out-of-order
-                msl::string::memcpy((void*)response, &itemState, sizeof(u16));
-                return sizeof(u16);
-            
-            } else {
-            if (spm::mario::marioKeyOffChk())
+        if(!params.valid || params.nInts < 1) 
             {
-                itemState = 9; // Error code for busy
-                msl::string::memcpy((void*)response, &itemState, sizeof(u16));
-                return sizeof(u16);
+                return msl::stdio::snprintf(
+                    (char*)response,
+                    responseSize,
+                    "%s",
+                    item.getHelpMsg()
+                );
+            };
+
+        if (spm::mario::marioKeyOffChk())
+            {
+                return msl::stdio::snprintf(
+                    (char*)response,
+                    responseSize,
+                    "Mario busy"
+                );
             }
 
-                // Accept and advance
-                *s_lastItemIdx = idx;
+        spm::mario::marioKeyOff();
 
-                spm::mario::marioKeyOff();
-                spm::evtmgr::EvtEntry* evt = spm::evtmgr::evtEntry(give_ap_item, 0, 0);
-                evt->lw[0] = (s32)itemId;
+        int itemId = params.ints[0];
+        wii::os::OSReport("CMD_ITEM: giving item id=%u\n", itemId);
+        spm::evtmgr::EvtEntry* evt = spm::evtmgr::evtEntry(give_ap_item, 0, 0);
+        if (!evt)
+            {
+                return msl::stdio::snprintf(
+                    (char*)response,
+                    responseSize,
+                    "evtEntry failed"
+                );
+            }
 
-                if (responseSize >= sizeof(u16)) {
-                    itemState = 1; // Success
-                    msl::string::memcpy((void*)response, &itemState, sizeof(u16));
-                    return sizeof(u16);
-                }
-                itemState = 0; // response too big
-                msl::string::memcpy((void*)response, &itemState, sizeof(u16));
-                return sizeof(u16);
-            } 
-        });
+        evt->lw[0] = (u16)itemId;
+
+        char msg[128];
+        return msl::stdio::snprintf(
+            msg,
+            sizeof(msg),
+            "CMD_ITEM: received item id=%u\n",
+            itemId
+        );
+    });
 
     COMMAND(CMD_IDX, idx, "Sets the current item index. (idx index)", 
         {
@@ -385,7 +422,98 @@ Params payloadProcess(const u8* payload, size_t payloadLen)
         });
 
 //Effect Commands
-    COMMAND(CMD_EFFECT_ITEMTHUNDER, effectTest, "Tests an effect. (effect_test effectId)", 
+
+    COMMAND(CMD_EFF_E_SPMRECOVERY, effSpmRecover, "Spawns the healing effect. (eff_spm_recovery floatX floatY floatZ intHP)", 
+        {
+            Params params =
+            payloadProcess(payload,payloadLen);
+
+            if(!params.valid || params.nInts < 1 || params.nFloats < 3) {
+                return msl::stdio::snprintf(
+                    (char*)response,
+                    responseSize,
+                    "%s",
+                    effSpmRecover.getHelpMsg()
+                );
+            };
+
+            int fx = params.floats[0];
+            int fy = params.floats[1];
+            int fz = params.floats[2];
+            int hp = params.ints[0];
+
+            spm::effdrv::EffEntry* entry = spm::effdrv::effSpmRecoveryEntry(fx, fy, fz, hp);
+            if(mod::trackedCount < MAX_EFFS)
+            {
+                mod::TrackedEff* t = &tracked[mod::trackedCount++];
+
+                t->entry = entry;
+                t->userWork = nullptr;
+                t->mainFunc = entry ? entry->mainFunc : nullptr;
+                t->name = entry ? entry->instanceName : nullptr;
+                t->cmdName = "CMD_EFFECT_SPMRECOVERY";
+            }
+
+            char msg[128];
+            return msl::stdio::snprintf(
+                msg,
+                sizeof(msg),
+                "Spawned recovery effect at (%f, %f, %f) with HP %d",
+                (double)fx, (double)fy, (double)fz, hp
+            );
+        });
+
+    COMMAND(CMD_EFF_E_VOLTENTRY, effVoltEntry, "Spawns the voltage effect. (eff_volt_entry floatX floatY int-Mode intParam2)", 
+        {
+            Params params =
+            payloadProcess(payload,payloadLen);
+
+            if(!params.valid || params.nInts < 2 || params.nFloats < 2) {
+                return msl::stdio::snprintf(
+                    (char*)response,
+                    responseSize,
+                    "%s",
+                    effVoltEntry.getHelpMsg()
+                );
+            };
+
+            EffTargetCtx ctx;
+
+            float fx = params.floats[0];
+            float fy = params.floats[1];
+
+            ctx.mode = params.ints[0];
+            ctx.id = 0;
+            ctx.x = 0.0f;
+            ctx.y = 0.0f;
+            ctx.z = 0.0f;
+            ctx.width = 100.0f;
+            ctx.height = 100.0f;
+
+            int p2 = params.ints[1];
+
+            spm::effdrv::EffEntry* entry = spm::effdrv::effSpmVoltEntry(fx, fy, (spm::effdrv::EffEntry*)&ctx, p2);
+            if(mod::trackedCount < MAX_EFFS)
+            {
+                mod::TrackedEff* t = &tracked[mod::trackedCount++];
+
+                t->entry = entry;
+                t->userWork = nullptr;
+                t->mainFunc = entry ? entry->mainFunc : nullptr;
+                t->name = entry ? entry->instanceName : nullptr;
+                t->cmdName = "CMD_EFFECT_VOLTENTRY";
+            }
+
+            char msg[128];
+            return msl::stdio::snprintf(
+                msg,
+                sizeof(msg),
+                "Spawned voltage effect at (%f, %f) with params %d, %d",
+                (double)fx, (double)fy, ctx.mode, p2
+            );
+        });
+
+    COMMAND(CMD_EFF_E_ITEMTHUNDER, effItemThunder, "Spawns a thunder effect. (floatX floatY floatZ intParam1 intParam2 intParam3 intParam4 intParam5)", 
         {
             Params params =
             payloadProcess(payload,payloadLen);
@@ -395,7 +523,7 @@ Params payloadProcess(const u8* payload, size_t payloadLen)
                     (char*)response,
                     responseSize,
                     "%s",
-                    effectTest.getHelpMsg()
+                    effItemThunder.getHelpMsg()
                 );
             };
 
@@ -409,9 +537,16 @@ Params payloadProcess(const u8* payload, size_t payloadLen)
             int p3 = params.ints[3];
             int p4 = params.ints[4];
 
-            spm::effdrv::EffEntry* e1 = spm::effdrv::effItemThunderEntry(fx, fy, fz, p0, p1, p2, p3, p4);
-            if (e1) {
-                wii::os::OSReport("e1->userWork: %p\n", e1->userWork);
+            spm::effdrv::EffEntry* entry = spm::effdrv::effItemThunderEntry(fx, fy, fz, p0, p1, p2, p3, p4);
+            if(mod::trackedCount < MAX_EFFS)
+            {
+                mod::TrackedEff* t = &tracked[mod::trackedCount++];
+
+                t->entry = entry;
+                t->userWork = nullptr;
+                t->mainFunc = entry ? entry->mainFunc : nullptr;
+                t->name = entry ? entry->instanceName : nullptr;
+                t->cmdName = "CMD_EFFECT_ITEMTHUNDER";
             }
 
             /*pos.y -= 2.0f;

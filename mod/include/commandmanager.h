@@ -56,7 +56,7 @@ enum CommandId : u16
     CMD_EFF_SETNAME = 0x0207, //effSetName                          void: (EffEntry *param_1,char *param_2)
     CMD_EFF_MAIN = 0x0208, //effMain                                void: (void)
     CMD_EFF_UNK_80061a34 = 0x0209, //func_80061a34                  void: (void)
-    CMD_EFF_SYSFILESLOADED = 0x020A, //effSystemFilesLoaded         bool: (void)                  
+    CMD_EFF_SYSFILESLOADED = 0x020A, //effSystemFilesLoaded         bool: (void)
     CMD_EFF_DELETE = 0x020B, //effDelete                            void: (EffEntry *param_1)
     CMD_EFF_SOFTDELETE = 0x020C, //effSoftDelete                    void: (EffEntry *param_1)
     CMD_EFF_NAMETOPTR = 0x020D, //effNameToPtr                      EffEntry *: (char *instanceName)
@@ -183,8 +183,9 @@ enum CommandId : u16
     CMD_EFF_E_SPMRECOVERYSUBD = 0x0265, //effSpmRecoverySubDEntry   EffEntry *: (double param_1,undefined4 param_2)
     CMD_EFF_E_SPMRECOVERYMAIN = 0x0266, //effSpmRecoveryMain        void: (EffEntry *param_1)
 
+    CMD_EFF_E_VOLTENTRY = 0x0270, //effSpmVoltEntry              EffEntry *: (double x,double y,int *param_3,int param_4)
 
-    CMD_EFFECT_ITEMTHUNDER = 0x0280, //effItemThunderEntry        EffEntry *: (float x, float y, float z, s32 param_4, s32 param_5, s32 param_6, s32 param_7, s32 param_8)
+    CMD_EFF_E_ITEMTHUNDER = 0x0280, //effItemThunderEntry        EffEntry *: (float x, float y, float z, s32 param_4, s32 param_5, s32 param_6, s32 param_7, s32 param_8)
     /*
     CMD_EFFECT_DAMAGESTAR = 0x0215, //effDamageStarEntry            EffEntry *: (float x, float y, float z,int damageType, s32 damage)
     */
