@@ -36,8 +36,21 @@ extern Command item; // 0x0100
 extern Command idx; // 0x0101
 extern Command mapInteract; // 0x0102
 
+struct EffTargetCtx
+{
+    u16 mode;
+    u16 id;
+    float x;
+    float y;
+    float z;
+    float width;
+    float height;
+};
+
 // Effect Commands
-extern Command effectTest; // 0x0200
+extern Command effSpmRecover; // 0x0260
+extern Command effVoltEntry; // 0x0270
+extern Command effItemThunder; // 0x0280
 
 /*EVT_DECLARE(msgbox_cmd)
 EVT_DECLARE(fwd_msgbox_cmd)

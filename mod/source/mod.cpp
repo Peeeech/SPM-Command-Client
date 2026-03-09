@@ -14,11 +14,14 @@
 #include <spm/itemdrv.h>
 #include <spm/evtmgr.h>
 #include <spm/effdrv.h>
+#include <spm/eff_sub.h>
+#include <spm/memory.h>
 #include <spm/seqdef.h>
 #include <spm/item_data.h>
 #include <spm/mario_pouch.h>
 #include <spm/evt_pouch.h>
 #include <spm/evt_seq.h>
+#include <spm/filemgr.h>
 #include <spm/map_data.h>
 #include <spm/spmario.h>
 #include <wii/os/OSError.h>
@@ -234,61 +237,344 @@ spm::evtmgr::EvtVar convertGswfToIndex(spm::evtmgr::EvtVar switchNumber)
     evtpatch::hookEvtReplace(mac_02_md->initScript, 1, mac_02);
 }
 
-static void* lastUserWork = 0;
-
-void (*effSetName)(spm::effdrv::EffEntry*, const char*);
-
-void print_effSetName(spm::effdrv::EffEntry *entry, const char *name)
+//memory alloc hook for debug
+void* (*__memAlloc)(int id, u32 size);
+void* memAllocDebug(int id, u32 size)
 {
-    effSetName(entry, name);
-    wii::os::OSReport("===================================");
-    wii::os::OSReport("\neffSetName called\n");
-    wii::os::OSReport("Entry ptr: %p\n", entry);
-    float* f = (float*)entry->userWork;
-    wii::os::OSReport("userWork as floats: (%f, %f, %f,)\n", f[0], f[1], f[2]);
-    wii::os::OSReport("flags: %04X\n", entry->flags);
-    wii::os::OSReport("type: %d\n", entry->type);
-    wii::os::OSReport("releaseType: %d\n", entry->releaseType);
-    wii::os::OSReport("userWork: %p\n", entry->userWork);
-    wii::os::OSReport("mainFunc: %p\n", entry->mainFunc);
-    wii::os::OSReport("instanceName: %s\n", entry->instanceName);
+  void* lr;
+  asm("mflr %0" : "=r"(lr));
+  
+  int storedId = id;
+  u32 storedSize = size;
 
-    if(msl::string::strcmp(name,"pureheart")==0)
+  void* ptr = __memAlloc(id, size);
+
+  if (id == EFFDATA_HEAPID){
+
+    if (pendingAllocCount < MAX_MEM_ALLOC)
     {
-        void* uw = entry->userWork;
-
-        wii::os::OSReport("pureheart userWork = %p\n", uw);
-
-        if(lastUserWork)
-        {
-            int size = (int)uw - (int)lastUserWork;
-            wii::os::OSReport("Estimated size = %X (%d)\n", size, size);
-        }
-
-        lastUserWork = uw;
+      pendingAllocs[pendingAllocCount].ptr = ptr;
+      pendingAllocs[pendingAllocCount].id = storedId;
+      pendingAllocs[pendingAllocCount].size = storedSize;
+      pendingAllocs[pendingAllocCount].caller = lr;
+      pendingAllocCount++;
     }
 
+    wii::os::OSReport("memAlloc called for EFFDATA with size: %d\nptr: %08X, caller: %08X\n", storedSize, ptr, lr);
+  }
+  return ptr;
+}
+
+//specific entry debug
+spm::effdrv::EffEntry * (*effSpmVoltEntry)(double x, double y, spm::effdrv::EffEntry *param_3, int param_4);
+spm::effdrv::EffEntry * effSpmVoltEntryDebug(double x, double y, spm::effdrv::EffEntry *param_3, int param_4)
+{
+  wii::os::OSReport("\neffSpmVoltEntryDebug called with params: x: %f, y: %f, param_3: %08X, param_4: %d\n", x, y, param_3, param_4);
+  spm::effdrv::EffEntry* entry = effSpmVoltEntry(x, y, param_3, param_4);
+  wii::os::OSReport("Returned entry: %08X\n", entry);
+  return entry;
+}
+
+
+
+//pointer table for tracking effs
+TrackedMemAlloc pendingAllocs[MAX_MEM_ALLOC];
+u32 pendingAllocCount = 0;
+
+TrackedEff tracked[MAX_EFFS];
+u32 trackedCount = 0;
+
+//used for debugging effEntry;
+spm::effdrv::EffEntry * trackedEntry = nullptr;
+
+spm::effdrv::EffEntry * (*effEntry)();
+spm::effdrv::EffEntry * effEntryDebug()
+{
+  spm::effdrv::EffEntry* entry = effEntry();
+
+  if(entry->instanceName && entry->instanceName[0] != '\0')
+    {
+      wii::os::OSReport("\n===================================");
+      wii::os::OSReport("\neffEntryDebug called, entry: %08X\n", entry);
+      wii::os::OSReport("entry->mainFunc: %08X\n", entry->mainFunc);
+      wii::os::OSReport("entry->userWork: %08X\n", entry->userWork);
+      wii::os::OSReport("entry->instanceName: %s\n", entry->instanceName);
+      wii::os::OSReport("entry->flags: %04X\n", entry->flags);
+      wii::os::OSReport("entry->type: %04X\n", entry->type);
+      wii::os::OSReport("entry->releaseType: %d\n", entry->releaseType);
+      wii::os::OSReport("===================================\n");
+    }
+    //NOTE: the above will likely never be called, as effEntry is moreso treated like a memory initializer rather than actually creating a fleshed out effect.
+    //Full effects seem centralized in eff[effectname]Entry pre-existing functions that will natively take varying parameters.
+
+  trackedEntry = entry;
+  return entry;
+}
+
+//used for debugging effEntryType, presumably for simpler anims that didn't need full, complex entry structs and just needed a type to determine which effect to spawn
+spm::effdrv::EffEntry * (*effEntryType)(s32 type);
+
+spm::effdrv::EffEntry * effEntryTypeDebug(s32 type)
+{
+  spm::effdrv::EffEntry* entry = effEntryType(type);
+
+  /*if(trackedCount < MAX_EFFS)
+    {
+      tracked[trackedCount].entry = entry;
+      tracked[trackedCount].lastUserWork = nullptr;
+      trackedCount++;
+    }*/
+  /*
+  wii::os::OSReport("\n===================================");
+  wii::os::OSReport("\neffEntryTypeDebug called, type: %d entry: %08X\n", type, entry);
+  wii::os::OSReport("===================================\n");*/
+
+  return entry;
+}
+
+//used for tracking internal name set
+void (*effSetName)(spm::effdrv::EffEntry * entry, const char * name);
+
+void effSetNameDebug(spm::effdrv::EffEntry * entry, const char * name)
+{
+  for (int i = 0; i < MAX_EFFS; i++)
+    {
+      if(tracked[i].entry == entry)
+      {
+        tracked[i].name = (char*)name;
+        wii::os::OSReport("\nSet name for tracked entry %08X: %s\n", entry, name);
+        break;
+      }
+    };
+    wii::os::OSReport("Name set for entry %08X: %s\n", entry, name);
+    if(entry->mainFunc)
+    {
+      wii::os::OSReport("MainFunc: %08X\n", entry->mainFunc);
+    }
+    effSetName(entry, name);
+}
+
+const char* lastName = nullptr;
+
+// used for tracking when the pointer name is appended to an effect object
+spm::effdrv::EffEntry * (*effNameToPtr)(const char * name);
+
+spm::effdrv::EffEntry * effNameToPtrDebug(const char * name)
+{
+    spm::effdrv::EffEntry* entry = effNameToPtr(name);
+
+    if(name != lastName)
+    {
+        wii::os::OSReport("\neffNameToPtrDebug called, name: %s entry: %08X\n",
+                          name ? name : "(null)", entry);
+
+        lastName = name;
+    }
+
+    return entry;
+}
+
+//used for tracking the instanceName called when effects are initialized by the actual orchestration function
+spm::effdrv::EffSet * (*effGetSet)(s32 *effectName);
+
+spm::effdrv::EffSet * effGetSetDebug(s32 *effectName)
+{
+  spm::effdrv::EffSet * set = effGetSet(effectName);
+  wii::os::OSReport("effGetSet called for effectName: %s\n", (char*)effectName);
+  return set;
+}
+
+// used for debugging effSubLoad; called per frame to interpret files and write data into memory for higher level emitter funcs
+void (*effSubLoad)(int);
+
+int debugCounter = 3; //startVal
+int debugCounterReset = debugCounter; //value to reset to when hits 0
+
+void effDebug(int fileId) //per-frame loop
+{
+    effSubLoad(fileId);
+    if(fileId != 0) //haven't seen any prints yet, worth an explicit print to catch if it happens
+    {
+    wii::os::OSReport("\n===================================");
+    wii::os::OSReport("\neffSubLoad called\n");
+    wii::os::OSReport("fileId NOT 0: %d\n\n\n", fileId);
+    
+    spm::eff_sub::EffSubWork* wp = spm::eff_sub::effsub_wp;
+
+    if(!wp) {
+        wii::os::OSReport("effSubLoad: effsub_wp is null\n");
+        return;
+    }
+
+    spm::filemgr::FileEntry* f = (spm::filemgr::FileEntry*)wp->activeDatFile;
+    spm::memory::SmartAllocation* sp = f->sp;
+    u32* table = (u32*)sp->data;
+
+    for (int i = 0; i < 16; i++)
+    {
+        u8* b = (u8*)table[i];
+
+        wii::os::OSReport(
+            "table[%02d] = %08X  %02X %02X %02X %02X  %02X %02X %02X %02X\n",
+            i,
+            table[i],
+            b[0], b[1], b[2], b[3],
+            b[4], b[5], b[6], b[7]
+        );
+    }
+  }
+
+  else // fileId == 0; this is the one called every frame; we space prints to not flood the console.
+  {
+    spm::eff_sub::EffSubWork* wp = spm::eff_sub::effsub_wp;
+
+    if(!wp) 
+    {
+      wii::os::OSReport("effSubLoad: effsub_wp is null\n");
+      return;
+    }
+
+    int frame = wp->frameCount;
+    if (frame % 60 == 0) 
+    {
+      debugCounter--;
+    } 
+    if (debugCounter == 0) 
+    {
+      //wii::os::OSReport("\n===================================\n===================================");
+      //wii::os::OSReport("\neffSubLoad called with fileId 0, frameCount: %d\n\n", frame);
+      
+      for (int i = 0; i < trackedCount; i++)
+        {
+          auto* entry = tracked[i].entry;
+          if (!entry) continue;
+
+          tracked[i].memAllocCount= 0;
+
+          if(entry->mainFunc && entry->userWork)
+          {
+            if(tracked[i].userWork != entry->userWork)
+            {
+              wii::os::OSReport("\n===================================");
+              if(tracked[i].mainFunc != entry->mainFunc)
+              {
+                wii::os::OSReport("\n\nEff %08X has new mainFunc: %08X\n", tracked[i].entry, entry->mainFunc);
+                tracked[i].name ? tracked[i].name : "(unnamed)";
+                tracked[i].entry = nullptr;
+                tracked[i] = tracked[trackedCount - 1];
+                trackedCount--;
+                i--;
+                continue;
+              }
+
+              wii::os::OSReport("\nentry: %08X\n", entry);
+              
+              if(tracked[i].cmdName != nullptr)
+              {
+                wii::os::OSReport("cmd: %s\n", tracked[i].cmdName);
+              }
+              if(tracked[i].name != nullptr)
+              {
+                wii::os::OSReport("name: %s\n", tracked[i].name);
+              }
+              
+              wii::os::OSReport("entry->mainFunc: %08X ", entry->mainFunc);
+              wii::os::OSReport("entry->userWork: %08X ", entry->userWork);
+              wii::os::OSReport("entry->instanceName: %s ", entry->instanceName);
+              wii::os::OSReport("\n===================================\n");
+
+              tracked[i].userWork = entry->userWork;
+              for (int j = 0; j < pendingAllocCount; j++)
+              {
+                if (pendingAllocs[j].ptr == entry->userWork)
+                {
+                    // store the allocation inside the effect tracker
+                    if (tracked[i].memAllocCount < MAX_MEM_ALLOC)
+                    {
+                        tracked[i].memAllocs[tracked[i].memAllocCount++] = pendingAllocs[j];
+                    }
+
+                    wii::os::OSReport(
+                        "BOUND alloc ptr=%08X size=%u caller=%08X\n",
+                        pendingAllocs[j].ptr,
+                        pendingAllocs[j].size,
+                        pendingAllocs[j].caller
+                    );
+
+                    // remove from pending list (swap removal)
+                    pendingAllocs[j] = pendingAllocs[pendingAllocCount - 1];
+                    pendingAllocCount--;
+                    break;
+                }
+              }
+            }
+          }
+        }
+
+
+      //wii::os::OSReport("\n===================================\n===================================\n");
+      debugCounter = debugCounterReset;
+    }
+  }
+}
+
+//debug funcs, unk, running on subLoadloop
+void (*FUN_80091788)(spm::effdrv::EffEntry * entry);
+void (*FUN_80091794)(spm::effdrv::EffEntry * entry);
+void (*effSpmRecoveryMain)(spm::effdrv::EffEntry * entry);
+
+void (*memcpy)(void * dest, const void * src, u32 size);
+
+void FUN_80091788_debug(spm::effdrv::EffEntry * entry)
+{
+  wii::os::OSReport("FUN_80091788 called for entry: %08X\n", entry);
+  wii::os::OSReport("flags: %04X\n", entry->flags);
+  wii::os::OSReport("type: %04X\n", entry->type);
+  wii::os::OSReport("releaseType: %d\n", entry->releaseType);
+  wii::os::OSReport("MainFunc: %08X\n", entry->mainFunc);
+  wii::os::OSReport("UserWork: %08X\n", entry->userWork);
+  wii::os::OSReport("instanceName: %s\n", entry->instanceName);
+  FUN_80091788(entry);
+}
+
+void FUN_80091794_debug(spm::effdrv::EffEntry * entry)
+{
+  wii::os::OSReport("FUN_80091794 called for entry: %08X\n", entry);
+  wii::os::OSReport("MainFunc: %08X\n", entry->mainFunc);
+  FUN_80091794(entry);
 }
 
 void main()
-{
-    wii::os::OSReport("SPM Rel Loader: the mod has ran!\n");
-    
-    NetMemoryAccess::init();
-    evtpatch::evtmgrExtensionInit();
-    evt_patches();
-    msgpatch::msgpatchMain();
-    msgpatch::msgpatchAddEntry("msg_AP_item_name", "AP Item", false);
-    msgpatch::msgpatchAddEntry("msg_AP_item_desc", "A valuable object from another dimension.", false);
-    spm::item_data::itemDataTable[45].nameMsg = "msg_AP_item_name";
-    spm::item_data::itemDataTable[45].descMsg = "msg_AP_item_desc";
-    spm::item_data::itemDataTable[45].iconId = 324;
-    pouchAddItem = patch::hookFunction(spm::mario_pouch::pouchAddItem, new_pouchAddItem);
-    itemEntry = patch::hookFunction(spm::itemdrv::itemEntry, new_itemEntry);
-    effSetName = patch::hookFunction(spm::effdrv::effSetName, print_effSetName);
-    writeBranchLink(spm::itemdrv::itemMain, 0xA18, new_itemCollectPouchItem);
+  {
+      wii::os::OSReport("SPM Rel Loader: the mod has ran!\n");
+      
+      NetMemoryAccess::init();
+      evtpatch::evtmgrExtensionInit();
+      evt_patches();
+      msgpatch::msgpatchMain();
+      msgpatch::msgpatchAddEntry("msg_AP_item_name", "AP Item", false);
+      msgpatch::msgpatchAddEntry("msg_AP_item_desc", "A valuable object from another dimension.", false);
+      spm::item_data::itemDataTable[45].nameMsg = "msg_AP_item_name";
+      spm::item_data::itemDataTable[45].descMsg = "msg_AP_item_desc";
+      spm::item_data::itemDataTable[45].iconId = 324;
+      pouchAddItem = patch::hookFunction(spm::mario_pouch::pouchAddItem, new_pouchAddItem);
+      itemEntry = patch::hookFunction(spm::itemdrv::itemEntry, new_itemEntry);
 
-    titleScreenCustomTextPatch();
-}
+      __memAlloc = patch::hookFunction(spm::memory::__memAlloc, memAllocDebug);
 
+      effSpmVoltEntry = patch::hookFunction(spm::effdrv::effSpmVoltEntry, effSpmVoltEntryDebug);
+
+      effEntry = patch::hookFunction(spm::effdrv::effEntry, effEntryDebug);
+      effEntryType = patch::hookFunction(spm::effdrv::effEntryType, effEntryTypeDebug);
+      effSetName = patch::hookFunction(spm::effdrv::effSetName, effSetNameDebug);
+      effGetSet = patch::hookFunction(spm::effdrv::effGetSet, effGetSetDebug);
+      effNameToPtr = patch::hookFunction(spm::effdrv::effNameToPtr, effNameToPtrDebug);
+      effSubLoad = patch::hookFunction(spm::effdrv::effSubLoad, effDebug);
+      writeBranchLink(spm::itemdrv::itemMain, 0xA18, new_itemCollectPouchItem);
+
+      FUN_80091788 = patch::hookFunction(spm::effdrv::FUN_80091788, FUN_80091788_debug);
+      FUN_80091794 = patch::hookFunction(spm::effdrv::FUN_80091794, FUN_80091794_debug);
+
+      titleScreenCustomTextPatch();
+  }
 }

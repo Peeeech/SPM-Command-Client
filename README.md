@@ -8,13 +8,17 @@
 Once this mod is running, your private IP address will be displayed on the title screen. The python client provided is an interactive GUI used to select and send commands, as well as to input custom parameters depending on the command called.
 
 ## List of commands
-(NOTE: IN THIS BUILD PARAMETERS ARE ONLY ACTIVELY PARSED FOR THE EFFECT COMMAND. READ COMMANDS *DO* WORK, BUT BASE COMMANDS CURRENTLY *DO NOT*.)
+(NOTE: IN THIS BUILD PARAMETERS ARE ONLY ACTIVELY PARSED FOR THE BASE (item) COMMAND, AND EFFECT COMMANDS. MAP-INTERACT AND SETIDX ARE UNIMPLEMENTED ATM)
+    
+    due to setidx being unimplemented, the item command is ran directly without checking for stored idx
 
 ### Read
 Read IDX: Reads a stored u32 IDX value saved in memory via GSW flags
+    
     Params: (N/A)
 
 Read Busy: Reads the current state of the game using the `marioKeyOffChk` function and returns whether the player is unable to send movement inputs at the moment
+
     Params: (N/A)
 
 ### Base
@@ -31,7 +35,23 @@ Map-Interact: Returns the XYZ Position of a Map Object from it's string-name
     Params: (Str[mapObjName])
 
 ### Effect
-Effect Test: Currently binded to the function `effItemThunderEntry` as it was used to test parameter functions. Usage varies by parameters
+SPM Recover: Recovers a set amount of health
+
+    Params: float(x) float(y) float(z) int(Hp)
+XYZ currently unk
+
+SPM Volt: Spawns the 'electric trickle' effect used by volt shroom / when thunder rage hits an enemy
+
+    Params: float(x) float(y) *int(mode) int(param_4)
+XY - used when appended to an entity; not implemented
+
+mode - used for identifying what to attach to; not implemented yet
+
+param_4 - unk
+
+to actually use the effect currently you just need *mode to != 0, and it'll spawn the effect at the room's (0, 0, 0) origin in worldspace
+
+Item Thunder: Has two use-cases: Type 0: Thunder flash. Type 1: Spawns a yellow 'hit bubble' effect and SpmVolt effect -- natively bound to Mario
 
     Params: (Float(x), Float(y), Float(z), Int[a], Int[b], Int[c], Int[d], Int[e])
 a - seems to be a 'type' parameter, where 0 is a global 'whole-screen' thunder flash, and 1 is like the volt shroom zap on mario
@@ -44,7 +64,6 @@ c - seems to be a delay of sorts; the higher the value, the longer between flash
 d - unk
 
 e - unk
-
 
 
 ## Credits

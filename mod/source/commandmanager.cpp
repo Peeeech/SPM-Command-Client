@@ -26,7 +26,9 @@ void InitBaseCommands(CommandManager* commandManager) {
 }
 
 void InitEffectCommands(CommandManager* commandManager) {
-    commandManager->addCommand(&effectTest);
+    commandManager->addCommand(&effSpmRecover);
+    commandManager->addCommand(&effVoltEntry);
+    commandManager->addCommand(&effItemThunder);
 }
 
 void initCommands() {
@@ -93,6 +95,19 @@ bool CommandManager::addCommand(const Command* cmd)
     u8 category = (cmd->id >> 8) & 0xFF;
     u8 command  = cmd->id & 0xFF;
 
+    if (category == CMD_CAT_HELP)
+    {
+        commandTable[category][command] = cmd;
+        wii::os::OSReport(
+        "\nRegister command %s (id=%04X cat=%u cmd=%u)\n",
+        cmd->getName(),
+        cmd->id,
+        category,
+        command
+        );
+        return true;
+    }
+
     if (category >= MAX_CATEGORY_ID)
         return false;
 
@@ -151,6 +166,21 @@ u32 CommandManager::parseAndExecute(
 
     u8 category = (fullId >> 8) & 0xFF;
     u8 command  = fullId & 0xFF;
+
+    //special case for help command to live outside of 'normal' command table
+    if (category == CMD_CAT_HELP)
+    {
+        const Command* pCmd = commandTable[category][command];
+        if (!pCmd) {
+            wii::os::OSReport("Unknown help command %04X\n", fullId);
+            return 0;
+        }
+        // payload starts after the header
+        const u8* payload = data + sizeof(u16) * 2;
+        size_t payloadLen = len - sizeof(u16) * 2;
+
+        return pCmd->executeBinary(payload, payloadLen, response, responseSize);
+    }
 
     if (category >= MAX_CATEGORY_ID) {
         wii::os::OSReport("Invalid command category %u\n", category);
