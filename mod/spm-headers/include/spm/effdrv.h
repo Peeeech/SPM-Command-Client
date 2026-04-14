@@ -96,6 +96,9 @@ void effGetTexObjN64(s32 id, GXTexObj * out);
 */
 void effAutoRelease(s32 releaseType);
 
+void FUN_80091788(EffEntry * entry);
+void FUN_80091794(EffEntry * entry);
+
 /*
     Creates an entry of type 0
 */
@@ -110,6 +113,8 @@ EffEntry * effEntryType(s32 type);
     Sets the name of an entry
 */
 void effSetName(EffEntry * entry, const char * name);
+
+void effSubLoad(int);
 
 /*
     Loads TPLs if not loaded, calls effSubMain and calls the mainFunc of each entry
@@ -129,6 +134,22 @@ void effSoftDelete(EffEntry * entry);
     Gets an entry by name
 */
 EffEntry * effNameToPtr(const char * name);
+
+EffSet * effGetSet(s32 *effectName);
+
+/* effSpmRecoveryEntry
+XYZ - spawn position of the effect
+hp - amount of HP the effect heals, shown as a number in the effect's animation.
+*/
+EffEntry * effSpmRecoveryEntry(float x, float y, float z, int hp);
+
+/* effSpmVoltEntry
+XY - spawn position of the effect
+param_3 - pointer to an int, presumably mode-type?
+param_4 - damage?
+*/
+EffEntry * effSpmVoltEntry(double x, double y, EffEntry *param_3, int param_4);
+
 
 /* effItemThunderEntry
 XYZ - unsure; don't seem used directly, maybe passed as args in the process of a higher level func?
